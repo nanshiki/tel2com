@@ -394,16 +394,17 @@ static char *convert_string(char *src_string, int code)
 	return dst_string;
 }
 
-static struct BASE_DATA *read_ini(char *ini_file)
+static int read_ini(char *ini_file)
 {
-	FILE *fp;
-	if((fp = fopen(ini_file, "r")) != NULL) {
-		if((base = (struct BASE_DATA *)malloc(sizeof(struct BASE_DATA))) != NULL) {
+	if((base = (struct BASE_DATA *)malloc(sizeof(struct BASE_DATA))) != NULL) {
+		FILE *fp;
+
+		memset(base, 0, sizeof(struct BASE_DATA));
+		if((fp = fopen(ini_file, "r")) != NULL) {
 			int section = sectionNone;
 			char *item, *value;
 			char line[PATH_MAX];
 
-			memset(base, 0, sizeof(struct BASE_DATA));
 			while(fgets(line, PATH_MAX, fp) != NULL) {
 				if(line[0] == '[') {
 					if((item = strtok(&line[1], "]\r\n")) != NULL) {
@@ -503,29 +504,33 @@ static struct BASE_DATA *read_ini(char *ini_file)
 					}
 				}
 			}
-		}
-		fclose(fp);
-	}
-	if(base->com == NULL) {
-		return NULL;
-	}
-	if(strchr(base->com->name, '/') == NULL) {
-		char path[PATH_MAX];
-		snprintf(path, PATH_MAX, "/dev/%s", base->com->name);
-		base->com->path = strdup(path);
-	} else {
-		base->com->path = strdup(base->com->name);
-	}
-	if(base->code != codeUTF8) {
-		int no;
-		for(no = 0 ; no < CUT_STRING_COUNT ; no++) {
-			base->cut_string[no] = convert_string(base->cut_string[no], base->code);
-		}
-		base->after_string = convert_string(base->after_string, base->code);
-		base->full_string = convert_string(base->full_string, base->code);
-	}
+			fclose(fp);
 
-	return base;
+			if(base->com != NULL) {
+				if(strchr(base->com->name, '/') == NULL) {
+					char path[PATH_MAX];
+					snprintf(path, PATH_MAX, "/dev/%s", base->com->name);
+					base->com->path = strdup(path);
+				} else {
+					base->com->path = strdup(base->com->name);
+				}
+				if(base->code != codeUTF8) {
+					int no;
+					for(no = 0 ; no < CUT_STRING_COUNT ; no++) {
+						base->cut_string[no] = convert_string(base->cut_string[no], base->code);
+					}
+					base->after_string = convert_string(base->after_string, base->code);
+					base->full_string = convert_string(base->full_string, base->code);
+				}
+				return TRUE;
+			} else {
+				fprintf(stderr, "serial port setting error.\n");
+			}
+		} else {
+			fprintf(stderr, "%s open error.\n", ini_file);
+		}
+	}
+	return FALSE;
 }
 
 int main(int argc, char *argv[])
@@ -540,7 +545,7 @@ int main(int argc, char *argv[])
 		snprintf(ini_file, PATH_MAX, "%s/%s", dir, INI_FILE);
 	}
 
-	if((base = read_ini(ini_file)) != NULL) {
+	if(read_ini(ini_file)) {
 		if((base->listen_socket = init_socket(base->telnet_port)) != -1) {
 			if(!init_com(base->com)) {
 				signal(SIGINT, sigcatch);
@@ -568,8 +573,6 @@ int main(int argc, char *argv[])
 		} else {
 			fprintf(stderr, "port %s listen error.\n", base->telnet_port);
 		}
-	} else {
-		fprintf(stderr, "tel2com.ini open error.\n");
 	}
 	done();
 
