@@ -147,27 +147,31 @@ void receive_socket(struct COM_DATA *com)
 			char receive_buffer[RECEIVE_BUFFER_LENGTH];
 			int receive_length;
 			if((receive_length = recv(com->socket, receive_buffer, RECEIVE_BUFFER_LENGTH, 0)) > 0) {
-				int no, send_length;
-				char send_buffer[SEND_BUFFER_LENGTH];
+				if(check_telnet_command()) {
+					int no, send_length;
+					char send_buffer[SEND_BUFFER_LENGTH];
 
-				send_length = 0;
-				for(no = 0 ; no < receive_length ; no++) {
-					if(com->ff_flag > 0) {
-						com->ff_flag--;
-						if(com->ff_flag == 1 && (unsigned char)receive_buffer[no] == 0xff) {
-							send_buffer[send_length++] = receive_buffer[no];
-							com->ff_flag = 0;
-						}
-					} else {
-						if((unsigned char)receive_buffer[no] == 0xff && check_telnet_command()) {
-							com->ff_flag = 2;
+					send_length = 0;
+					for(no = 0 ; no < receive_length ; no++) {
+						if(com->ff_flag > 0) {
+							com->ff_flag--;
+							if(com->ff_flag == 1 && (unsigned char)receive_buffer[no] == 0xff) {
+								send_buffer[send_length++] = receive_buffer[no];
+								com->ff_flag = 0;
+							}
 						} else {
-							send_buffer[send_length++] = receive_buffer[no];
+							if((unsigned char)receive_buffer[no] == 0xff) {
+								com->ff_flag = 2;
+							} else {
+								send_buffer[send_length++] = receive_buffer[no];
+							}
 						}
 					}
-				}
-				if(send_length > 0) {
-					write(com->handle, send_buffer, send_length);
+					if(send_length > 0) {
+						write(com->handle, send_buffer, send_length);
+					}
+				} else {
+					write(com->handle, receive_buffer, receive_length);
 				}
 				gettimeofday(&com->no_comm_start, NULL);
 			} else {

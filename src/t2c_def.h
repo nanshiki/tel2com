@@ -1,5 +1,9 @@
+#ifndef TRUE
 #define	TRUE			1
+#endif
+#ifndef FALSE
 #define	FALSE			0
+#endif
 
 #define	TELNET_PORT		23
 #define	RECEIVE_BUFFER_LENGTH	1200
@@ -71,7 +75,7 @@ struct COM_DATA {
 	int connect_interval;
 	int connect;
 	int modem;
-	int dsr;
+	int dsr_cut;
 
 	int socket;
 	int ff_flag;

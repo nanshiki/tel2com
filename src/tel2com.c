@@ -291,7 +291,7 @@ static void check_timer(struct COM_DATA *com)
 				close_socket(com);
 			}
 		}
-		if(com->modem && com->dsr) {
+		if(com->modem && com->dsr_cut) {
 			if(!get_dsr(com)) {
 				if(check_debug()) {
 					printf("DSR OFF\n");
@@ -453,7 +453,7 @@ static int read_ini(char *ini_file)
 								} else if(!strcasecmp(item, "connect_interval")) {
 									base->com->connect_interval = atoi(value);
 								} else if(!strcasecmp(item, "dsr_cut")) {
-									base->com->dsr = get_value(on_off_list, value);
+									base->com->dsr_cut = get_value(on_off_list, value);
 								} else if(!strcasecmp(item, "flow")) {
 									base->com->flow = get_value(flow_list, value);
 								} else if(!strcasecmp(item, "modem")) {

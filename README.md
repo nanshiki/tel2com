@@ -2,8 +2,8 @@ tel2com
 ====
 
 TCP/IP とシリアルポートを中継するプログラムです。  
-昔のパソコン通信の BBS ホストプログラムや RS-232C で制御する機器を telnet を使用して LAN やインターネットから制御できます。  
-Raspberry Pi, Nano Pi, BeagbleBone Black 等の Linux が動作するシングルボードコンピュータでも使用可能です。  
+昔のパソコン通信の BBS ホストプログラムに telnet で接続したり、RS-232C で制御する機器を telnet を使用して LAN やインターネットから制御できます。  
+Raspberry Pi, Nano Pi, BeagbleBone Black, PINE64 等の Linux が動作するシングルボードコンピュータでも使用可能です。  
 ただし、シングルボードコンピュータで RS-232C を使用する場合、UART の信号レベルは 3.3V ですので、レベル変換 IC 等を使用して接続する必要があります。  
 
 ## 対応機器・デストリビューション

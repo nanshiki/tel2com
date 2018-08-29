@@ -379,18 +379,20 @@ void receive_com(struct COM_DATA *com)
 				}
 			}
 		} else {
-			char send_buffer[SEND_BUFFER_LENGTH];
-			int send_length = 0;
 			int no;
-			for(no = 0 ; no < receive_length ; no++) {
-				if(check_telnet_command()) {
+			if(check_telnet_command()) {
+				char send_buffer[SEND_BUFFER_LENGTH];
+				int send_length = 0;
+				for(no = 0 ; no < receive_length ; no++) {
 					if(receive_buffer[no] == (char)0xff) {
 						send_buffer[send_length++] = 0xff;
 					}
+					send_buffer[send_length++] = receive_buffer[no];
 				}
-				send_buffer[send_length++] = receive_buffer[no];
+				send(com->socket, send_buffer, send_length, 0);
+			} else {
+				send(com->socket, receive_buffer, receive_length, 0);
 			}
-			send(com->socket, send_buffer, send_length, 0);
 
 			gettimeofday(&com->no_comm_start, NULL);
 
