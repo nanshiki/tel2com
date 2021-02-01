@@ -42,22 +42,22 @@ static int set_block(int fd, int flag)
 	return 0;
 }
 
-int check_close(int socket)
+int check_close(int sock)
 {
 	fd_set mask;
 	struct timeval timeout;
 	int width, ret;
 
 	FD_ZERO(&mask);
-	FD_SET(socket, &mask);
-	width = socket + 1;
+	FD_SET(sock, &mask);
+	width = sock + 1;
 
 	timeout.tv_sec = 0;
 	timeout.tv_usec = 100;
 	if((ret = select(width, (fd_set *)&mask, NULL, NULL, &timeout)) > 0) {
-		if(FD_ISSET(socket, &mask)) {
+		if(FD_ISSET(sock, &mask)) {
 			char buffer[RECEIVE_BUFFER_LENGTH];
-			if(recv(socket, buffer, RECEIVE_BUFFER_LENGTH, 0) <= 0) {
+			if(recv(sock, buffer, RECEIVE_BUFFER_LENGTH, 0) <= 0) {
 				return TRUE;
 			}
 		}
@@ -97,33 +97,41 @@ int init_socket(char *port)
 	return -1;
 }
 
+void close_connect_com(struct COM_DATA *com)
+{
+	if(com != NULL) {
+		com->socket = -1;
+		com->channel = NULL;
+		if(!com->check_flag) {
+			char *after_string;
+			if((after_string = get_after_string()) != NULL) {
+				send_com(com, after_string);
+			}
+		}
+		if(com->modem) {
+			set_dtr(com, FALSE);
+#ifdef PC_LINUX
+			com->status = statusWaitOpenCom;
+			gettimeofday(&com->check_start, NULL);
+			return;
+#endif
+		}
+		if(get_keep_timer() == 0) {
+			com->status = statusDisconnect;
+		} else {
+			com->status = statusKeep;
+			gettimeofday(&com->check_start, NULL);
+		}
+	}
+}
+
 void close_socket(struct COM_DATA *com)
 {
 	close(com->socket);
 	if(check_debug()) {
 		printf("close %d\n", com->socket);
 	}
-	com->socket = -1;
-	if(!com->check_flag) {
-		char *after_string;
-		if((after_string = get_after_string()) != NULL) {
-			send_com(com, after_string);
-		}
-	}
-	if(com->modem) {
-		set_dtr(com, FALSE);
-#ifdef PC_LINUX
-		com->status = statusWaitOpenCom;
-		gettimeofday(&com->check_start, NULL);
-		return;
-#endif
-	}
-	if(get_keep_timer() == 0) {
-		com->status = statusDisconnect;
-	} else {
-		com->status = statusKeep;
-		gettimeofday(&com->check_start, NULL);
-	}
+	close_connect_com(com);
 }
 
 void receive_socket(struct COM_DATA *com)
@@ -171,6 +179,8 @@ void receive_socket(struct COM_DATA *com)
 						write(com->handle, send_buffer, send_length);
 					}
 				} else {
+					com->send_id_flag = 1;
+					com->send_pass_flag = 1;
 					write(com->handle, receive_buffer, receive_length);
 				}
 				gettimeofday(&com->no_comm_start, NULL);
@@ -184,8 +194,9 @@ void receive_socket(struct COM_DATA *com)
 void start_connect(struct COM_DATA *com)
 {
 	com->status = statusConnect;
-	com->check_pos[0] = 0;
-	com->check_pos[1] = 0;
+	memset(com->check_pos, 0, sizeof(com->check_pos));
+	com->send_id_flag = 0;
+	com->send_pass_flag = 0;
 	com->ff_flag = 0;
 	gettimeofday(&com->limit_start, NULL);
 	com->no_comm_start = com->limit_start;
@@ -213,11 +224,13 @@ void loop_listen(int listen_socket)
 			len = (socklen_t)sizeof(from);
 			if((new_socket = accept(listen_socket, (struct sockaddr *)&from, &len)) != -1) {
 				struct COM_DATA *com;
+				char *change_code = get_teraterm_change_code_string();
 
 				if(check_debug()) {
 					printf("connect %d\n", new_socket);
 				}
 				if((com = get_empty_com()) != NULL) {
+
 					com->socket = new_socket;
 					set_block(com->socket, TRUE);
 
@@ -225,6 +238,9 @@ void loop_listen(int listen_socket)
 						send(com->socket, "\x0ff\x0fb\x000", 3, 0);
 						send(com->socket, "\x0ff\x0fd\x000", 3, 0);
 						send(com->socket, "\x0ff\x0fb\x001", 3, 0);
+					}
+					if(change_code != NULL) {
+						send(com->socket, change_code, strlen(change_code), 0);
 					}
 					com->ff_flag = 0;
 					if(com->modem) {
@@ -246,6 +262,9 @@ void loop_listen(int listen_socket)
 				} else {
 					char *full_string;
 					if((full_string = get_full_string()) != NULL) {
+						if(change_code != NULL) {
+							send(new_socket, change_code, strlen(change_code), 0);
+						}
 						send(new_socket, full_string, strlen(full_string), 0);
 						shutdown(new_socket, SHUT_WR);
 						add_shutdown_socket(new_socket);

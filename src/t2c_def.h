@@ -1,3 +1,6 @@
+#include <libssh/callbacks.h>
+#include <libssh/server.h>
+
 #ifndef TRUE
 #define	TRUE			1
 #endif
@@ -52,6 +55,15 @@ enum {
 	codeEUC,
 };
 
+enum {
+	checkCut1,
+	checkCut2,
+	checkBbsId,
+	checkBbsPassword,
+
+	checkMax
+};
+
 struct SHUTDOWN_DATA {
 	struct SHUTDOWN_DATA *next;
 	int socket;
@@ -76,10 +88,15 @@ struct COM_DATA {
 	int connect;
 	int modem;
 	int dsr_cut;
+	int ssh_flag;
+	int ssh_auth_mode;
+	int send_id_flag;
+	int send_pass_flag;
 
 	int socket;
+	ssh_channel channel;
 	int ff_flag;
-	int check_pos[2];
+	int check_pos[checkMax];
 	int check_flag;
 	int line_length;
 	char line_buffer[RECEIVE_BUFFER_LENGTH];
@@ -98,8 +115,6 @@ struct COM_DATA {
 #endif
 };
 
-#define	CUT_STRING_COUNT	2
-
 struct BASE_DATA {
 	char *telnet_port;
 	int telnet_command;
@@ -107,12 +122,22 @@ struct BASE_DATA {
 	int no_comm_timer;
 	int limit_timer;
 	int keep_timer;
-	char *cut_string[CUT_STRING_COUNT];
+	char *check_string[checkMax];
 	char *after_string;
 	char *full_string;
 	int code;
 	struct COM_DATA *com;
 	struct SHUTDOWN_DATA *shutdown_data;
 	int debug_flag;
+
+	int ssh_flag;
+	int ssh_port;
+	int ssh_auth_mode;
+	char *ssh_id_string;
+	char *ssh_pass_string;
+	char *ssh_host_key;
+	char *ssh_pub_key;
+	int teraterm_change_code;
+	char *teraterm_change_code_string;
 };
 

@@ -31,6 +31,7 @@
 #include "t2c_def.h"
 #include "tel2com.h"
 #include "telnet.h"
+#include "sshd.h"
 #include "uart.h"
 
 #ifdef SYS_CLASS_GPIO
@@ -234,6 +235,16 @@ void set_dtr(struct COM_DATA *com, int flag)
 					digitalWrite(com->dtr_pin, HIGH);
 				}
 			}
+		} else {
+			int data;
+
+			ioctl(com->handle, TIOCMGET, &data);
+			if(flag) {
+				data |= TIOCM_DTR;
+			} else {
+				data &= !TIOCM_DTR;
+			}
+			ioctl(com->handle, TIOCMSET, &data);
 		}
 #endif
 #ifdef SYS_CLASS_GPIO
@@ -252,6 +263,16 @@ void set_dtr(struct COM_DATA *com, int flag)
 				}
 			}
 			lseek(com->dtr_fd, 0, SEEK_SET);
+		} else {
+			int data;
+
+			ioctl(com->handle, TIOCMGET, &data);
+			if(flag) {
+				data |= TIOCM_DTR;
+			} else {
+				data &= !TIOCM_DTR;
+			}
+			ioctl(com->handle, TIOCMSET, &data);
 		}
 #endif
 		if(check_debug()) {
@@ -282,6 +303,13 @@ int get_dsr(struct COM_DATA *com)
 					return TRUE;
 				}
 			}
+		} else {
+			int data;
+
+			ioctl(com->handle, TIOCMGET, &data);
+			if(data & TIOCM_DSR) {
+				return TRUE;
+			}
 		}
 #endif
 #ifdef SYS_CLASS_GPIO
@@ -299,6 +327,13 @@ int get_dsr(struct COM_DATA *com)
 					return TRUE;
 				}
 			}
+		} else {
+			int data;
+
+			ioctl(com->handle, TIOCMGET, &data);
+			if(data & TIOCM_DSR) {
+				return TRUE;
+			}
 		}
 #endif
 	}
@@ -314,7 +349,7 @@ void send_connect(struct COM_DATA *com)
 
 void send_com(struct COM_DATA *com, char *text)
 {
-	if(com->handle != -1) {
+	if(com->handle != -1 && text != NULL) {
 		write(com->handle, text, strlen(text));
 
 		if(check_debug()) {
@@ -328,8 +363,12 @@ void close_com(struct COM_DATA *com)
 	tcsetattr(com->handle, TCSANOW, &com->old_tio);
 	close(com->handle);
 	com->handle = -1;
-	if(com->socket != -1) {
-		close_socket(com);
+	if(com->ssh_flag) {
+		close_ssh(com);
+	} else {
+		if(com->socket != -1) {
+			close_socket(com);
+		}
 	}
 }
 
@@ -379,27 +418,47 @@ void receive_com(struct COM_DATA *com)
 				}
 			}
 		} else {
-			int no;
-			if(check_telnet_command()) {
-				char send_buffer[SEND_BUFFER_LENGTH];
-				int send_length = 0;
-				for(no = 0 ; no < receive_length ; no++) {
-					if(receive_buffer[no] == (char)0xff) {
-						send_buffer[send_length++] = 0xff;
-					}
-					send_buffer[send_length++] = receive_buffer[no];
-				}
-				send(com->socket, send_buffer, send_length, 0);
+			int no, check_no;
+			if(com->ssh_flag) {
+				send_ssh(com, receive_buffer, receive_length);
 			} else {
-				send(com->socket, receive_buffer, receive_length, 0);
+				if(check_telnet_command()) {
+					char send_buffer[SEND_BUFFER_LENGTH];
+					int send_length = 0;
+					for(no = 0 ; no < receive_length ; no++) {
+						if(receive_buffer[no] == (char)0xff) {
+							send_buffer[send_length++] = 0xff;
+						}
+						send_buffer[send_length++] = receive_buffer[no];
+					}
+					send(com->socket, send_buffer, send_length, 0);
+				} else {
+					send(com->socket, receive_buffer, receive_length, 0);
+				}
 			}
 
 			gettimeofday(&com->no_comm_start, NULL);
 
 			for(no = 0 ; no < receive_length ; no++) {
-				if(check_cut_string(com, receive_buffer[no])) {
-					com->check_flag = TRUE;
-					close_socket(com);
+				if((check_no = check_string(com, receive_buffer[no])) != checkMax) {
+					if(check_no == checkCut1 || check_no == checkCut2) {
+						com->check_flag = TRUE;
+						if(com->ssh_flag) {
+							close_ssh(com);
+						} else {
+							close_socket(com);
+						}
+					} else if(com->ssh_flag && com->ssh_auth_mode == authModeBBS) {
+						if(check_no == checkBbsId && com->send_id_flag == 0) {
+							com->send_id_flag = 1;
+							send_com(com, get_ssh_enter_id(com));
+							send_com(com, "\r");
+						} else if(check_no == checkBbsPassword && com->send_pass_flag == 0) {
+							com->send_pass_flag = 1;
+							send_com(com, get_ssh_enter_pass(com));
+							send_com(com, "\r");
+						}
+					}
 				}
 			}
 		}

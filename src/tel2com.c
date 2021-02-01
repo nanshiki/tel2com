@@ -18,10 +18,12 @@
 #include <unistd.h>
 #include <iconv.h>
 #include <sys/time.h>
+#include <sys/socket.h>
 
 #include "t2c_def.h"
 #include "uart.h"
 #include "telnet.h"
+#include "sshd.h"
 
 #define	INI_FILE			"tel2com.ini"
 
@@ -34,6 +36,7 @@ enum {
 	sectionNone,
 	sectionCom,
 	sectionTelnet,
+	sectionSsh,
 	sectionTime,
 	sectionText,
 	sectionDebug,
@@ -75,8 +78,15 @@ static const char *level_list[] = {
 
 static const char *code_list[] = {
 	"utf8",
-	"shiftjis",
+	"sjis",
 	"euc",
+	NULL
+};
+
+static const char *auth_list[] = {
+	"pass",
+	"key",
+	"bbs",
 	NULL
 };
 
@@ -87,22 +97,38 @@ static void done()
 	int no;
 
 	if(base != NULL) {
-		struct SHUTDOWN_DATA *data = base->shutdown_data;
-		while(data != NULL) {
-			struct SHUTDOWN_DATA *next_data = data->next;
-			close(data->socket);
-			free(data);
-			data = next_data;
-		}
-		if(base->listen_socket != -1) {
-			close(base->listen_socket);
+		if(base->ssh_flag) {
+			done_ssh();
+		} else {
+			struct SHUTDOWN_DATA *data = base->shutdown_data;
+			while(data != NULL) {
+				struct SHUTDOWN_DATA *next_data = data->next;
+				close(data->socket);
+				free(data);
+				data = next_data;
+			}
+			if(base->listen_socket != -1) {
+				close(base->listen_socket);
+			}
 		}
 		if(base->telnet_port != NULL) {
 			free(base->telnet_port);
 		}
-		for(no = 0 ; no < CUT_STRING_COUNT ; no++) {
-			if(base->cut_string[no] != NULL) {
-				free(base->cut_string[no]);
+		if(base->ssh_id_string != NULL) {
+			free(base->ssh_id_string);
+		}
+		if(base->ssh_pass_string != NULL) {
+			free(base->ssh_pass_string);
+		}
+		if(base->ssh_host_key != NULL) {
+			free(base->ssh_host_key);
+		}
+		if(base->ssh_pub_key != NULL) {
+			free(base->ssh_pub_key);
+		}
+		for(no = 0 ; no < checkMax ; no++) {
+			if(base->check_string[no] != NULL) {
+				free(base->check_string[no]);
 			}
 		}
 		if(base->after_string != NULL) {
@@ -126,6 +152,9 @@ static void done()
 				free(base->com->path);
 			}
 			free(base->com);
+		}
+		if(base->teraterm_change_code_string) {
+			free(base->teraterm_change_code_string);
 		}
 		free(base);
 		base = NULL;
@@ -166,28 +195,33 @@ int check_telnet_command()
 	return base->telnet_command;
 }
 
+char *get_teraterm_change_code_string()
+{
+	return base->teraterm_change_code_string;
+}
+
 int check_debug()
 {
 	return base->debug_flag;
 }
 
-int check_cut_string(struct COM_DATA *com, char ch)
+int check_string(struct COM_DATA *com, char ch)
 {
 	int no;
 
-	for(no = 0 ; no < CUT_STRING_COUNT ; no++) {
-		if(base->cut_string[no] != NULL) {
-			if(base->cut_string[no][com->check_pos[no]] == ch) {
+	for(no = 0 ; no < checkMax ; no++) {
+		if(base->check_string[no] != NULL) {
+			if(base->check_string[no][com->check_pos[no]] == ch) {
 				com->check_pos[no]++;
-				if(base->cut_string[no][com->check_pos[no]] == '\0') {
-					return TRUE;
+				if(base->check_string[no][com->check_pos[no]] == '\0') {
+					return no;
 				}
 			} else {
 				com->check_pos[no] = 0;
 			}
 		}
 	}
-	return FALSE;
+	return checkMax;
 }
 
 static void check_shutdown_socket()
@@ -245,7 +279,7 @@ static void get_dir(char *dir, const char *src)
 	*dir = '\0';
 }
 
-static int progress_timer(struct timeval start)
+int progress_timer(struct timeval start)
 {
 	struct timeval now, diff;
 
@@ -283,12 +317,20 @@ static void check_timer(struct COM_DATA *com)
 	} else if(com->status == statusConnect) {
 		if(base->limit_timer != 0) {
 			if(progress_timer(com->limit_start) >= base->limit_timer * 1000) {
-				close_socket(com);
+				if(base->ssh_flag) {
+					close_ssh(com);
+				} else {
+					close_socket(com);
+				}
 			}
 		}
 		if(base->no_comm_timer != 0) {
 			if(progress_timer(com->no_comm_start) >= base->no_comm_timer * 1000) {
-				close_socket(com);
+				if(base->ssh_flag) {
+					close_ssh(com);
+				} else {
+					close_socket(com);
+				}
 			}
 		}
 		if(com->modem && com->dsr_cut) {
@@ -296,7 +338,11 @@ static void check_timer(struct COM_DATA *com)
 				if(check_debug()) {
 					printf("DSR OFF\n");
 				}
-				close_socket(com);
+				if(base->ssh_flag) {
+					close_ssh(com);
+				} else {
+					close_socket(com);
+				}
 			}
 		}
 	} else if(com->status == statusKeep) {
@@ -422,6 +468,8 @@ static int read_ini(char *ini_file)
 #endif
 						} else if(!strcasecmp(item, "telnet")) {
 							section = sectionTelnet;
+						} else if(!strcasecmp(item, "ssh")) {
+							section = sectionSsh;
 						} else if(!strcasecmp(item, "time")) {
 							section = sectionTime;
 						} else if(!strcasecmp(item, "text")) {
@@ -475,6 +523,26 @@ static int read_ini(char *ini_file)
 								} else if(!strcasecmp(item, "command")) {
 									base->telnet_command = get_value(on_off_list, value);
 								}
+							} else if(section == sectionSsh) {
+								if(!strcasecmp(item, "enable")) {
+									base->ssh_flag = get_value(on_off_list, value);
+								} else if(!strcasecmp(item, "port")) {
+									base->ssh_port = atoi(value);
+								} else if(!strcasecmp(item, "host_key")) {
+									base->ssh_host_key = strdup(value);
+								} else if(!strcasecmp(item, "auth_mode")) {
+									base->ssh_auth_mode = get_value(auth_list, value);
+								} else if(!strcasecmp(item, "user")) {
+									base->ssh_id_string = strdup(value);
+								} else if(!strcasecmp(item, "pass")) {
+									base->ssh_pass_string = strdup(value);
+								} else if(!strcasecmp(item, "bbs_id")) {
+									base->check_string[checkBbsId] = strdup(value);
+								} else if(!strcasecmp(item, "bbs_pass")) {
+									base->check_string[checkBbsPassword] = strdup(value);
+								} else if(!strcasecmp(item, "pub_key")) {
+									base->ssh_pub_key = strdup(value);
+								}
 							} else if(section == sectionTime) {
 								if(!strcasecmp(item, "no_comm")) {
 									base->no_comm_timer = atoi(value);
@@ -485,15 +553,21 @@ static int read_ini(char *ini_file)
 								}
 							} else if(section == sectionText) {
 								if(!strcasecmp(item, "cut1")) {
-									base->cut_string[0] = change_crlf_string(value);
+									base->check_string[checkCut1] = change_crlf_string(value);
 								} else if(!strcasecmp(item, "cut2")) {
-									base->cut_string[1] = change_crlf_string(value);
+									base->check_string[checkCut2] = change_crlf_string(value);
 								} else if(!strcasecmp(item, "after")) {
 									base->after_string = change_crlf_string(value);
 								} else if(!strcasecmp(item, "full")) {
 									base->full_string = change_crlf_string(value);
 								} else if(!strcasecmp(item, "code")) {
-									base->code = get_value(code_list, value);
+									if(strcasecmp(item, "shiftjis")) {
+										base->code = codeShiftJIS;
+									} else {
+										base->code = get_value(code_list, value);
+									}
+								} else if(!strcasecmp(item, "teraterm")) {
+									base->teraterm_change_code = get_value(on_off_list, value);
 								}
 							} else if(section == sectionDebug) {
 								if(!strcasecmp(item, "debug")) {
@@ -516,13 +590,18 @@ static int read_ini(char *ini_file)
 				}
 				if(base->code != codeUTF8) {
 					int no;
-					for(no = 0 ; no < CUT_STRING_COUNT ; no++) {
-						base->cut_string[no] = convert_string(base->cut_string[no], base->code);
+					for(no = 0 ; no < checkMax ; no++) {
+						base->check_string[no] = convert_string(base->check_string[no], base->code);
 					}
 					base->after_string = convert_string(base->after_string, base->code);
 					base->full_string = convert_string(base->full_string, base->code);
 				}
-				return TRUE;
+				if(base->teraterm_change_code) {
+					char temp[PATH_MAX];
+					snprintf(temp, PATH_MAX, "\x01b]5963;kr=%s;kt=%s\x007", code_list[base->code], code_list[base->code]);
+					base->teraterm_change_code_string = strdup(temp);
+				}
+				return 0;
 			} else {
 				fprintf(stderr, "serial port setting error.\n");
 			}
@@ -530,7 +609,7 @@ static int read_ini(char *ini_file)
 			fprintf(stderr, "%s open error.\n", ini_file);
 		}
 	}
-	return FALSE;
+	return 1;
 }
 
 int main(int argc, char *argv[])
@@ -540,22 +619,44 @@ int main(int argc, char *argv[])
 
 	get_dir(dir, argv[0]);
 	if(argc > 1) {
-		snprintf(ini_file, PATH_MAX, "%s/%s", dir, argv[1]);
+		if(argc > 2) {
+			printf("%s\n", create_password_hash(argv[2]));
+			return 0;
+		}
+		if(snprintf(ini_file, PATH_MAX, "%s/%s", dir, argv[1]) < 0) {
+			return 1;
+		}
 	} else {
-		snprintf(ini_file, PATH_MAX, "%s/%s", dir, INI_FILE);
+		if(snprintf(ini_file, PATH_MAX, "%s/%s", dir, INI_FILE) < 0) {
+			return 1;
+		}
 	}
 
-	if(read_ini(ini_file)) {
-		if((base->listen_socket = init_socket(base->telnet_port)) != -1) {
+	if(!read_ini(ini_file)) {
+		int enable_flag = 0;
+		if(base->ssh_flag) {
+			if(!init_ssh(base->ssh_port, base->ssh_host_key, base->ssh_auth_mode, base->ssh_id_string, base->ssh_pass_string, base->ssh_pub_key)) {
+				enable_flag = 1;
+			}
+		} else {
+			if((base->listen_socket = init_socket(base->telnet_port)) != -1) {
+				enable_flag = 1;
+			} else {
+				fprintf(stderr, "port %s listen error.\n", base->telnet_port);
+			}
+		}
+		if(enable_flag) {
 			if(!init_com(base->com)) {
 				signal(SIGINT, sigcatch);
 				signal(SIGTERM, sigcatch);
-
 				while(1) {
-					loop_listen(base->listen_socket);
-
-					if(base->com->socket != -1) {
-						receive_socket(base->com);
+					if(base->ssh_flag) {
+						check_ssh();
+					} else {
+						loop_listen(base->listen_socket);
+						if(base->com->socket != -1) {
+							receive_socket(base->com);
+						}
 					}
 					if(base->com->handle != -1) {
 						receive_com(base->com);
@@ -570,8 +671,6 @@ int main(int argc, char *argv[])
 			} else {
 				fprintf(stderr, "%s open error.\n", base->com->path);
 			}
-		} else {
-			fprintf(stderr, "port %s listen error.\n", base->telnet_port);
 		}
 	}
 	done();
