@@ -1,10 +1,10 @@
 CC = cc
 EXENAME = tel2com
 SRCDIR = ../src
-SRCS = $(SRCDIR)/tel2com.c $(SRCDIR)/uart.c $(SRCDIR)/telnet.c
+SRCS = $(SRCDIR)/tel2com.c $(SRCDIR)/uart.c $(SRCDIR)/telnet.c $(SRCDIR)/sshd.c
 OBJS = $(SRCS:%.c=%.o)
 CFLAGS = -DUSE_GPIO -DSYS_CLASS_GPIO -Wall
-LDLIBS = 
+LDLIBS = -lssh -lcrypt
 
 %.o: %.c 
 	$(CC) -c $(CFLAGS) -o $@ $<
