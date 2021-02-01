@@ -30,9 +30,10 @@ $ cd PC
 $ make  
 
 PC 版の Linux では gcc や make がインストールされていない場合があります。  
+その場合、
 $ sudo apt install gcc make  
 $ sudo yum install gcc make  
-を実行してください。  
+等を実行してください。  
 
 Raspberry Pi の場合  
 $ cd RaspberryPi  
@@ -57,8 +58,10 @@ PC の場合は
 name=ttyS0  
 を使用するシリアルポートに変更してください。  
 
-SSH の認証方法については認証方法の各項目の設定が必要です。  
-パスフレーズ認証の場合、tel2com -p passphrase を実行して表示される文字列を pass= に設定してください。  
+SSH については認証方法の各項目の設定が必要です。  
+パスフレーズ認証の場合、ユーザー名を user= に、  
+$ tel2com -p パスフレーズ  
+を実行して表示される文字列を pass= に設定してください。  
 公開鍵認証の場合、公開鍵のファイル名を pub_key= に設定してください。  
 BBS 認証の場合、BBS の ID やパスワード入力時に表示される文字列を bbs_id=, bbs_pass= に設定してください。  
 
