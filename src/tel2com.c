@@ -612,6 +612,11 @@ static int read_ini(char *ini_file)
 	return 1;
 }
 
+void usage()
+{
+	printf("Usage: tel2com [ini_file] [-p passphrase]\n");
+}
+
 int main(int argc, char *argv[])
 {
 	char dir[PATH_MAX];
@@ -619,8 +624,15 @@ int main(int argc, char *argv[])
 
 	get_dir(dir, argv[0]);
 	if(argc > 1) {
-		if(argc > 2) {
-			printf("%s\n", create_password_hash(argv[2]));
+		if(!strcmp(argv[1], "-p")) {
+			if(argc > 2) {
+				printf("%s\n", create_password_hash(argv[2]));
+			} else {
+				usage();
+			}
+			return 0;
+		} else if(argv[1][0] == '-') {
+			usage();
 			return 0;
 		}
 		if(snprintf(ini_file, PATH_MAX, "%s/%s", dir, argv[1]) < 0) {
