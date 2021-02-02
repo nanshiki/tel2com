@@ -459,14 +459,16 @@ void send_ssh(struct COM_DATA *com, char *buffer, int length)
 int init_ssh(int port, char *host_key, int auth_mode, char *user, char *pass, char *pub_key)
 { 
 	int ret;
-	ssh_key key;
+	ssh_key key = NULL;
 
 #ifdef ENABLE_SSHD_LOG
 	ssh_set_log_callback(log_function);
 	ssh_set_log_level(5);
 #endif
 	ret = ssh_pki_import_privkey_file(host_key, NULL, NULL, NULL, &key);
-	ssh_key_free(key);
+	if(key != NULL) {
+		ssh_key_free(key);
+	}
 	if(ret != SSH_OK) {
 		fprintf(stderr, "SSH: host key read error. %s\n", host_key);
 		return -2;
